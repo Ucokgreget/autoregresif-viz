@@ -36,7 +36,7 @@ def parse_fim_response(raw_response: dict) -> dict:
     selected_tokens = logprob["tokens"]
     candidate_per_step = logprob["top_logprobs"]
 
-    step = []
+    steps = []
     for step_index, (selected_token, candidates) in enumerate(
         zip(selected_tokens, candidate_per_step)
     ):
@@ -48,7 +48,7 @@ def parse_fim_response(raw_response: dict) -> dict:
 
         is_stop = "end_of_sentence" in selected_token or "im_end" in selected_token
 
-        step.append({
+        steps.append({
             "step_index":step_index,
             "selected_token":selected_token,
             "is_stop":is_stop,
@@ -57,9 +57,9 @@ def parse_fim_response(raw_response: dict) -> dict:
                 for token, prob in ranked_candidates
             ]
         })
-        return step
+    return steps
 
-def generate_with_step(prompt:str, max_tokens: int =20, top_logprobs:int=20) -> list[dict]:
+def generate_with_steps(prompt:str, max_tokens: int =20, top_logprobs:int=20) -> list[dict]:
     raw_response = call_deepseek_fim(prompt, max_tokens=max_tokens, top_logprobs=top_logprobs)
     return parse_fim_response(raw_response)
 
