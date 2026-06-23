@@ -15,7 +15,7 @@ from schema import(
     TokenCandidate
 )
 
-from service import deepseek_service, tokenize_service
+from service import deepseek_service, tokenizer_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def _build_prompt_token(prompt: str) -> list[PromptToken]:
     raw_tokens = tokenizer_service.tokenize_with_ids(prompt)
     result = []
     for item in raw_tokens:
-        display = tokenize_service.decode_token_string(item["token"])
+        display = tokenizer_service.decode_token_string(item["token"])
         result.append(
             PromptToken(
                 token_display=display,
@@ -33,6 +33,7 @@ def _build_prompt_token(prompt: str) -> list[PromptToken]:
                 token_id = item['id']
             )
         )
+    return result
 
 def _build_steps(raw_step: list[dict]) -> list[GenerationStep]:
     steps = []
@@ -53,7 +54,7 @@ def _build_steps(raw_step: list[dict]) -> list[GenerationStep]:
 
     return steps
 
-router.post(
+@router.post(
     "/generate",
     response_model=GenerateResponse,
     responses={
@@ -68,7 +69,7 @@ async def generate(
     settings: Settings = Depends(get_settings),
 ) -> GenerateResponse:
     try:
-        token_count = tokenize_service.count_tokens(body.prompt)
+        token_count = tokenizer_service.count_tokens(body.prompt)
     except Exception as exc:
         logger.error("Tokenizer errror: %s", exc)
         raise HTTPException(
@@ -85,7 +86,7 @@ async def generate(
         )
     
     try:
-        prompt_token = _build_prompt_token(body.prompt)
+        prompt_tokens = _build_prompt_token(body.prompt)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -115,7 +116,7 @@ async def generate(
     steps = _build_steps(raw_step)
 
     generated_text = "".join(
-        tokenize_service.decode_token_string(s.selected_token)
+        tokenizer_service.decode_token_string(s.selected_token)
         for s in steps
         if not s.is_stop
     )
@@ -127,7 +128,7 @@ async def generate(
     )
 
     return GenerateResponse(
-        prompt_token=prompt_token,
+        prompt_tokens=prompt_tokens,
         steps=steps,
         total_steps=len(steps),
         generated_text=generated_text

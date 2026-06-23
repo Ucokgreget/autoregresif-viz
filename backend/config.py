@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     )
 
     deepseek_model: str = Field(
-        default="deepseek-v4-pro",
+        default="deepseek-v4-flash",
         description="Model ID yang dipakai. Harus support FIM + logprobs.",
     )
 

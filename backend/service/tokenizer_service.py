@@ -21,7 +21,7 @@ def _load_tokenizer() -> PreTrainedTokenizerBase:
 
     logger.info("Tokenizer selesai di-load. Vocab size %d, model max len %s",
                 tok.vocab_size,
-                getattr(tok, "model_max_length", "unknown")
+                getattr(tok, "model_max_lenght", "unknown")
             )
     return tok
 
