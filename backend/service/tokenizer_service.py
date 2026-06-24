@@ -1,9 +1,13 @@
 from requests import get
+import re
 import logging
 from functools import lru_cache
 from typing import Optional
 
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+
+SPECIAL_TOKENS = ["<|im_start|>", "<|im_end|>", "<|end_of_sentence|>", "<|begin▁of▁sentence|>"]
+_SPECIAL_PATTERN = re.compile('(' + '|'.join(re.escape(st) for st in SPECIAL_TOKENS) + ')')
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +38,37 @@ def tokenize_to_string(text: str) -> list[str]:
     return tok.convert_ids_to_tokens(ids)
 
 
+def _get_special_token_id(tok, token_str: str) -> int:
+    token_id = tok.convert_tokens_to_ids(token_str)
+    if token_id is not None and token_id != getattr(tok, 'unk_token_id', None):
+        return token_id
+    added_vocab = tok.get_added_vocab()
+    if token_str in added_vocab:
+        return added_vocab[token_str]
+    if hasattr(tok, 'added_tokens_encoder') and token_str in tok.added_tokens_encoder:
+        return tok.added_tokens_encoder[token_str]
+    return 0
+
+
 def tokenize_with_ids(text: str) -> list[dict]:
     tok = get_tokenizer()
-    ids = tok.encode(text, add_special_tokens=False)
-    token = tok.convert_ids_to_tokens(ids)
-    return [{"id":_id, "token":token} for _id, token in zip(ids, token)]
+    parts = _SPECIAL_PATTERN.split(text)
+    result = []
+    for part in parts:
+        if not part:
+            continue
+        if part in SPECIAL_TOKENS:
+            token_id = _get_special_token_id(tok, part)
+            result.append({"id": token_id, "token": part})
+        else:
+            ids = tok.encode(part, add_special_tokens=False)
+            tokens = tok.convert_ids_to_tokens(ids)
+            for _id, t in zip(ids, tokens):
+                result.append({"id": _id, "token": t})
+    return result
 
 def count_tokens(text: str) -> int:
-    tok = get_tokenizer()
-    return len(tok.encode(text, add_special_tokens=False))
+    return len(tokenize_with_ids(text))
 
 def decode_token_string(token_str: str) -> str:
     tok = get_tokenizer()

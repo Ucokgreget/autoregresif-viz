@@ -58,7 +58,7 @@ def parse_fim_response(raw_response: dict) -> dict:
                 for token, prob in ranked_candidates
             ]
         })
-        return step
+    return step
 
 def generate_with_steps(prompt:str, max_tokens: int =20, top_logprobs:int=20) -> list[dict]:
     raw_response = call_deepseek_fim(prompt, max_tokens=max_tokens, top_logprobs=top_logprobs)

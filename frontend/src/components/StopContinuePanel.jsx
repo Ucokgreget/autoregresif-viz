@@ -27,26 +27,21 @@ export default function StopContinuePanel({
         </h3>
       </div>
 
-      {/* Continue/Stop Buttons (Visual Only) */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
-        <div
-          className={`py-2 px-3 rounded-lg text-xs font-bold text-center border transition-all duration-300 ${
-            showContinueActive
-              ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs ring-2 ring-emerald-500/20'
-              : 'bg-gray-50 text-gray-400 border-gray-200 opacity-60'
-          }`}
-        >
-          Continue
-        </div>
-        <div
-          className={`py-2 px-3 rounded-lg text-xs font-bold text-center border transition-all duration-300 ${
-            showStopActive
-              ? 'bg-red-500 text-white border-red-500 shadow-xs ring-2 ring-red-500/20'
-              : 'bg-gray-50 text-gray-400 border-gray-200 opacity-60'
-          }`}
-        >
-          Stop
-        </div>
+      {/* Generation Status Info Card */}
+      <div className={`p-3 rounded-lg border mb-4 text-xs font-semibold flex items-center justify-between transition-colors duration-300 ${
+        isDone 
+          ? (isEndTokenMatched ? 'bg-red-50 border-red-200 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-700')
+          : (state === 'animating' ? 'bg-teal-50 border-teal-200 text-brand-teal' : 'bg-gray-50 border-gray-200 text-gray-400')
+      }`}>
+        <span className="uppercase tracking-wider text-[10px] font-bold text-gray-500">Execution Status</span>
+        <span className="font-bold font-mono">
+          {state === 'idle' && 'IDLE'}
+          {state === 'fetching' && 'FETCHING...'}
+          {state === 'animating' && 'GENERATING'}
+          {state === 'done' && (
+            isEndTokenMatched ? 'STOPPED (EOS)' : (generatedCount >= maxTokens ? 'STOPPED (LIMIT)' : 'STOPPED')
+          )}
+        </span>
       </div>
 
       {/* Stats Cards Stack */}

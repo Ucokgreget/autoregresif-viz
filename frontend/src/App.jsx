@@ -30,14 +30,70 @@ function App() {
 
   // Animation step progress
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  // Sub-states: 'input_tokens' | 'compute_probs' | 'select_token' | 'stop_or_continue'
-  const [currentSubState, setCurrentSubState] = useState('input_tokens');
+  // Sub-states: 'compute_probs' | 'select_token' | 'stop_or_continue' | 'input_tokens'
+  const [currentSubState, setCurrentSubState] = useState('compute_probs');
 
   // Ref to store timer interval
   const timerRef = useRef(null);
 
   // Derive values for components
   const subStateDuration = playbackSpeed / 4;
+
+  // 1. Debounced Tokenizer for Real-time user input chips
+  useEffect(() => {
+    if (state !== 'idle') return;
+
+    const delayDebounce = setTimeout(() => {
+      const tokenize = async () => {
+        let finalPrompt = prompt;
+        if (systemPrompt.trim()) {
+          finalPrompt = `<|im_start|>system\n${systemPrompt.trim()}<|im_end|>\n<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`;
+        }
+        if (!finalPrompt.trim()) {
+          setPromptTokens([]);
+          return;
+        }
+        try {
+          const res = await fetch(`${BACKEND_BASE_URL}/api/tokenize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: finalPrompt })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setPromptTokens(data);
+          } else {
+            generateMockPromptTokens(finalPrompt);
+          }
+        } catch (err) {
+          generateMockPromptTokens(finalPrompt);
+        }
+      };
+      tokenize();
+    }, 250);
+
+    return () => clearTimeout(delayDebounce);
+  }, [prompt, systemPrompt, state]);
+
+  // Local fallback tokenizer if backend is loading or unreachable
+  const generateMockPromptTokens = (text) => {
+    // Split text keeping spaces as tokens
+    const words = text.split(/(\s+)/);
+    const tokens = words.filter(w => w !== '').map((w, idx) => ({
+      token_display: w,
+      token_raw: w,
+      token_id: Math.abs(hashString(w)) % 50000 + 10
+    }));
+    setPromptTokens(tokens);
+  };
+
+  const hashString = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return hash;
+  };
 
   // Derive accumulated generated tokens based on current animation state
   const getGeneratedTokens = () => {
@@ -47,24 +103,25 @@ function App() {
     if (state === 'done') {
       limit = steps.length;
     } else {
-      // If animating
-      if (currentSubState === 'stop_or_continue') {
+      // If animating: include the token of the current step ONLY in the 'input_tokens' phase
+      if (currentSubState === 'input_tokens') {
         limit = currentStepIndex + 1;
       } else {
         limit = currentStepIndex;
       }
     }
 
-    return steps.slice(0, limit).map((step, idx) => {
-      // Map candidates to get token display
-      const display = step.selected_token;
-      return {
-        token_display: display,
-        token_raw: display,
-        token_id: step.candidates?.[0]?.token === display ? (idx + 50000) : (idx + 60000), // mock id
-        isGenerated: true
-      };
-    });
+    return steps.slice(0, limit)
+      .filter(step => !step.is_stop)
+      .map((step, idx) => {
+        const display = step.selected_token;
+        return {
+          token_display: display,
+          token_raw: display,
+          token_id: step.candidates?.[0]?.token === display ? (idx + 50000) : (idx + 60000),
+          isGenerated: true
+        };
+      });
   };
 
   const generatedTokens = getGeneratedTokens();
@@ -81,10 +138,9 @@ function App() {
   const fetchGeneration = async (shouldStartPlaying = false) => {
     setState('fetching');
     setErrorMsg('');
-    setPromptTokens([]);
     setSteps([]);
     setCurrentStepIndex(0);
-    setCurrentSubState('input_tokens');
+    setCurrentSubState('compute_probs');
 
     // Combine user prompt with system prompt if active
     let finalPrompt = prompt;
@@ -114,7 +170,10 @@ function App() {
       }
 
       const data = await response.json();
-      setPromptTokens(data.prompt_tokens || []);
+      // Keep real tokenized prompt from generate endpoint to match exactly
+      if (data.prompt_tokens) {
+        setPromptTokens(data.prompt_tokens);
+      }
       setSteps(data.steps || []);
 
       if (!data.steps || data.steps.length === 0) {
@@ -123,7 +182,7 @@ function App() {
       } else {
         setState('animating');
         setCurrentStepIndex(0);
-        setCurrentSubState('input_tokens');
+        setCurrentSubState('compute_probs');
         if (shouldStartPlaying) {
           setIsPlaying(true);
         }
@@ -136,7 +195,7 @@ function App() {
     }
   };
 
-  // Playback timer loop
+  // Playback timer loop: compute_probs -> select_token -> stop_or_continue -> input_tokens
   useEffect(() => {
     if (state !== 'animating' || !isPlaying) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -145,11 +204,11 @@ function App() {
 
     timerRef.current = setInterval(() => {
       setCurrentSubState((prev) => {
-        if (prev === 'input_tokens') return 'compute_probs';
         if (prev === 'compute_probs') return 'select_token';
         if (prev === 'select_token') return 'stop_or_continue';
+        if (prev === 'stop_or_continue') return 'input_tokens';
         
-        // At stop_or_continue, check if we move to next step or finish
+        // At input_tokens, check if we move to next step or finish
         const currentStep = steps[currentStepIndex];
         const isLastStep = currentStepIndex >= steps.length - 1;
         
@@ -157,10 +216,10 @@ function App() {
           setState('done');
           setIsPlaying(false);
           clearInterval(timerRef.current);
-          return 'stop_or_continue';
+          return 'input_tokens'; // stay in input_tokens as final state
         } else {
           setCurrentStepIndex((idx) => idx + 1);
-          return 'input_tokens';
+          return 'compute_probs';
         }
       });
     }, subStateDuration);
@@ -175,31 +234,27 @@ function App() {
     if (state === 'idle') {
       fetchGeneration(true);
     } else if (state === 'done') {
-      // Re-run
       fetchGeneration(true);
     } else {
       setIsPlaying(!isPlaying);
     }
   };
 
-  // Handle Step button (manually advance one step instantly)
+  // Handle Step button (manually advance substate or step index)
   const handleStep = async () => {
     if (state === 'idle' || state === 'done') {
       await fetchGeneration(false);
-      // Wait for fetch to finish and set state.
-      // But fetch is async, so we can't run the rest immediately.
-      // It's cleaner to let the fetched response land first, and put the sub-state to stop_or_continue of step 0.
       return;
     }
 
     if (state === 'animating') {
-      setIsPlaying(false); // Pause on manual step
+      setIsPlaying(false); // Pause autoplay if running
 
-      if (currentSubState !== 'stop_or_continue') {
-        // Complete the current step instantly
-        setCurrentSubState('stop_or_continue');
+      if (currentSubState !== 'input_tokens') {
+        // Fast forward the current step to input_tokens (commit it to context/response text)
+        setCurrentSubState('input_tokens');
       } else {
-        // We are already at the end of this step. Check if we can go to next step
+        // We are already at input_tokens of current step. Move to next step's compute_probs
         const currentStep = steps[currentStepIndex];
         const isLastStep = currentStepIndex >= steps.length - 1;
 
@@ -207,7 +262,7 @@ function App() {
           setState('done');
         } else {
           setCurrentStepIndex((idx) => idx + 1);
-          setCurrentSubState('stop_or_continue'); // Go to next step's end state instantly
+          setCurrentSubState('input_tokens'); // Instantly commit next step's token
         }
       }
     }
@@ -226,56 +281,38 @@ function App() {
   const handleRestart = () => {
     setIsPlaying(false);
     setState('idle');
-    setPromptTokens([]);
+    // Don't clear promptTokens completely, let debouncer re-tokenize prompt on restart
     setSteps([]);
     setCurrentStepIndex(0);
-    setCurrentSubState('input_tokens');
+    setCurrentSubState('compute_probs');
     setErrorMsg('');
   };
 
   // Determine current active step data to send to sub-panels
   const getActiveStepForProbs = () => {
     if (state === 'idle' || state === 'fetching' || steps.length === 0) return null;
-    
     let index = currentStepIndex;
-    if (state === 'animating' && currentSubState === 'input_tokens') {
-      index = currentStepIndex - 1;
-    }
-    
-    if (state === 'done') {
-      index = steps.length - 1;
-    }
-    
+    if (state === 'done') index = steps.length - 1;
     return index >= 0 ? steps[index] : null;
   };
 
   const getActiveStepForSelect = () => {
     if (state === 'idle' || state === 'fetching' || steps.length === 0) return null;
-    
     let index = currentStepIndex;
-    if (state === 'animating' && (currentSubState === 'input_tokens' || currentSubState === 'compute_probs')) {
+    if (state === 'animating' && currentSubState === 'compute_probs') {
       index = currentStepIndex - 1;
     }
-    
-    if (state === 'done') {
-      index = steps.length - 1;
-    }
-    
+    if (state === 'done') index = steps.length - 1;
     return index >= 0 ? steps[index] : null;
   };
 
   const getActiveStepForStop = () => {
     if (state === 'idle' || state === 'fetching' || steps.length === 0) return null;
-    
     let index = currentStepIndex;
-    if (state === 'animating' && currentSubState !== 'stop_or_continue') {
+    if (state === 'animating' && (currentSubState === 'compute_probs' || currentSubState === 'select_token')) {
       index = currentStepIndex - 1;
     }
-    
-    if (state === 'done') {
-      index = steps.length - 1;
-    }
-    
+    if (state === 'done') index = steps.length - 1;
     return index >= 0 ? steps[index] : null;
   };
 

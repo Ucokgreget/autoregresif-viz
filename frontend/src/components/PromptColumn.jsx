@@ -210,7 +210,7 @@ export default function PromptColumn({
         <button
           type="button"
           onClick={onStep}
-          disabled={isControlsDisabled}
+          disabled={state === 'fetching'}
           className="flex items-center justify-center py-2 px-3 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Advance one full token generation step manually"
         >

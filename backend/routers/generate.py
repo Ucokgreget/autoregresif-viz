@@ -43,16 +43,56 @@ def _build_steps(raw_step: list[dict]) -> list[GenerationStep]:
             for c in raw["candidates"]
         ]
 
-    steps.append(
-        GenerationStep(
-            step_index=raw["step_index"],
-            selected_token=raw["selected_token"],
-            is_stop=raw["is_stop"],
-            candidates=candidates
+        steps.append(
+            GenerationStep(
+                step_index=raw["step_index"],
+                selected_token=raw["selected_token"],
+                is_stop=raw["is_stop"],
+                candidates=candidates
+            )
         )
-    )
 
-    return steps
+    # Merge consecutive tokens that reconstruct special tokens
+    special_tokens = ["<|im_start|>", "<|im_end|>", "<|end_of_sentence|>", "<|begin_of_sentence|>"]
+    merged = []
+    i = 0
+    n = len(steps)
+    while i < n:
+        matched_token = None
+        matched_len = 0
+        for sp in special_tokens:
+            temp_str = ""
+            for k in range(i, n):
+                temp_str += steps[k].selected_token
+                if temp_str == sp:
+                    matched_token = sp
+                    matched_len = k - i + 1
+                    break
+                elif len(temp_str) > len(sp):
+                    break
+            if matched_token:
+                break
+
+        if matched_token:
+            first_step = steps[i]
+            prob = first_step.candidates[0].probability if first_step.candidates else 1.0
+            merged_candidates = [TokenCandidate(token=matched_token, probability=prob)]
+
+            merged_step = GenerationStep(
+                step_index=len(merged),
+                selected_token=matched_token,
+                is_stop=True if matched_token in ["<|im_end|>", "<|end_of_sentence|>"] else first_step.is_stop,
+                candidates=merged_candidates
+            )
+            merged.append(merged_step)
+            i += matched_len
+        else:
+            step = steps[i]
+            step.step_index = len(merged)
+            merged.append(step)
+            i += 1
+
+    return merged
 
 @router.post(
     "/generate",
@@ -137,5 +177,21 @@ async def generate(
 @router.get("/health", summary="Health Check")
 async def health() -> dict:
     return {"status":"ok"}
+
+from pydantic import BaseModel
+
+class TokenizeRequest(BaseModel):
+    prompt: str
+
+@router.post("/tokenize", response_model=list[PromptToken], summary="Tokenize prompt text")
+async def tokenize_prompt(body: TokenizeRequest) -> list[PromptToken]:
+    try:
+        return _build_prompt_token(body.prompt)
+    except Exception as exc:
+        logger.error("Tokenize error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal tokenisasi: {str(exc)}"
+        )
 
 
